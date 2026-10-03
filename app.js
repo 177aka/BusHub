@@ -1,7 +1,20 @@
-// ⚠️ Remplace TON_ID_PROJET par le vrai ID de ton projet Supabase
+// --- CONFIGURATION SUPABASE & ID DE PROJET ---
 const SUPABASE_URL = 'https://sglpkosiijcftoiqlcyg.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_3Rnvf81P39qJ_IepYWzvhQ_HZR9WL66';
+
 const sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// Gestionnaire d'utilisateur anonyme unique
+function getDeviceId() {
+    let devId = localStorage.getItem('bushub_user_id');
+    if (!devId) {
+        devId = 'usr_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
+        localStorage.setItem('bushub_user_id', devId);
+    }
+    return devId;
+}
+
+const MY_USER_ID = getDeviceId();
 
 const AppState = {
     posts: [],
@@ -16,8 +29,11 @@ const DOM = {
     filterPhoto: document.getElementById('filter-photo'),
     filterVideo: document.getElementById('filter-video'),
     reloadBtn: document.getElementById('reload-btn'),
-    reloadIcon: document.getElementById('reload-icon')
+    reloadIcon: document.getElementById('reload-icon'),
+    networkBanner: document.getElementById('network-banner')
 };
+
+let timerInterval = null;
 
 function getStartOfTodayISO() {
     const d = new Date();
@@ -34,44 +50,137 @@ function formatTodayBadge() {
 async function init() {
     formatTodayBadge();
     setupEventListeners();
+    updateOnlineStatus();
+
+    // Récupération depuis la mise en cache locale d'abord (Affichage ultra rapide)
+    loadLocalCache();
+
+    // Ensuite synchronisation réseau
     await fetchTodayPostsAndSubscribe();
+
+    if (timerInterval) clearInterval(timerInterval);
+    timerInterval = setInterval(updateAllTimers, 1000);
 }
 
-// --- FONCTION DE RELOAD (NEED NETWORK) ---
+// --- GESTION DES RÉACTIONS RAPIDES ---
+async function handleReactionClick(postId, emoji) {
+    const post = AppState.posts.find(p => p.id === postId);
+    if (!post) return;
+
+    // structure reactions = { "🔥": ["usr_1", "usr_2"], "👍": ["usr_3"] }
+    let reactions = post.reactions || {};
+    
+    // Si c'est l'ancien format d'objet numéroté, conversion automatique
+    Object.keys(reactions).forEach(k => {
+        if (typeof reactions[k] === 'number') reactions[k] = [];
+    });
+
+    if (!Array.isArray(reactions[emoji])) {
+        reactions[emoji] = [];
+    }
+
+    const userIndex = reactions[emoji].indexOf(MY_USER_ID);
+
+    if (userIndex > -1) {
+        // Retirer la réaction si l'utilisateur réappuie
+        reactions[emoji].splice(userIndex, 1);
+    } else {
+        // Ajouter l'utilisateur à l'emoji
+        reactions[emoji].push(MY_USER_ID);
+    }
+
+    // Mise à jour locale immédiate (Optimistic UI)
+    post.reactions = { ...reactions };
+    saveToLocalCache();
+    renderPosts();
+
+    // Synchronisation Supabase en tâche de fond
+    if (navigator.onLine) {
+        const { error } = await sbClient
+            .from('posts')
+            .update({ reactions: post.reactions })
+            .eq('id', postId);
+
+        if (error) console.error("Erreur mise à jour réaction:", error);
+    }
+}
+
+// --- COMPTE À REBOURS DE DISPARITION (24H) ---
+function getTimeRemaining(createdAt) {
+    const createdTime = new Date(createdAt).getTime();
+    const expireTime = createdTime + (24 * 60 * 60 * 1000);
+    const now = Date.now();
+    const diff = expireTime - now;
+
+    if (diff <= 0) return "Expiré";
+
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+    return `${hours}h ${minutes}m ${seconds}s`;
+}
+
+function updateAllTimers() {
+    document.querySelectorAll('[data-expiry-id]').forEach(el => {
+        const postId = el.getAttribute('data-expiry-id');
+        const post = AppState.posts.find(p => p.id === postId);
+        if (post) {
+            const timeLeft = getTimeRemaining(post.created_at);
+            el.textContent = `⏱️ Expire dans ${timeLeft}`;
+        }
+    });
+}
+
+// --- GESTION DU CACHE LOCAL (SANS RÉSEAU) ---
+function saveToLocalCache() {
+    try {
+        localStorage.setItem('bushub_posts_cache', JSON.stringify(AppState.posts));
+    } catch (e) {
+        console.warn("Stockage local saturé:", e);
+    }
+}
+
+function loadLocalCache() {
+    const cached = localStorage.getItem('bushub_posts_cache');
+    if (cached) {
+        try {
+            AppState.posts = JSON.parse(cached);
+            renderPosts();
+        } catch (e) {
+            console.error("Erreur lecture cache:", e);
+        }
+    }
+}
+
+// --- RELOAD ET ETAT DU RÉSEAU ---
+function updateOnlineStatus() {
+    if (navigator.onLine) {
+        DOM.networkBanner.classList.add('hidden');
+    } else {
+        DOM.networkBanner.classList.remove('hidden');
+    }
+}
+
 async function forceNetworkReload() {
-    // Vérification de la connexion Internet
     if (!navigator.onLine) {
-        alert("Connexion réseau requise pour recharger le flux en direct.");
+        alert("Réseau indisponible. Utilisation de la version en cache.");
         return;
     }
 
-    // Animation de rotation sur le bouton
     DOM.reloadIcon.classList.add('animate-spin');
 
     try {
-        // Vider les caches du Service Worker
-        if ('caches' in window) {
-            const cacheNames = await caches.keys();
-            await Promise.all(cacheNames.map(name => caches.delete(name)));
-        }
-
-        // Répartir l'abonnement Realtime Supabase
         sbClient.removeAllChannels();
-
-        // Récupération forcée depuis la BDD Supabase
         await fetchTodayPostsAndSubscribe();
-
     } catch (err) {
-        console.error("Erreur lors du rechargement:", err);
+        console.error("Erreur de rechargement:", err);
     } finally {
-        // Arrêt de l'animation après un petit délai visuel
-        setTimeout(() => {
-            DOM.reloadIcon.classList.remove('animate-spin');
-        }, 500);
+        setTimeout(() => DOM.reloadIcon.classList.remove('animate-spin'), 400);
     }
 }
 
-// --- COMPRESSION COMPACTE ---
+// --- COMPRESSION COMPACTE DES IMAGES ---
 function fileToBase64(file) {
     return new Promise((resolve) => {
         if (file.type.startsWith('video')) {
@@ -102,8 +211,7 @@ function fileToBase64(file) {
                     canvas.height = height;
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, width, height);
-
-                    resolve(canvas.toDataURL('image/jpeg', 0.6));
+                    resolve(canvas.toDataURL('image/jpeg', 0.55));
                 };
                 img.src = e.target.result;
             };
@@ -112,37 +220,44 @@ function fileToBase64(file) {
     });
 }
 
-// --- PUBLICATION EN DIRECT ---
+// --- PUBLICATION EN DIRECT ET ENVOI ---
 async function uploadMedia(file) {
-    if (!navigator.onLine) {
-        alert("Impossible de publier sans connexion réseau.");
-        return;
-    }
-
     const isVideo = file.type.startsWith('video');
     const mediaType = isVideo ? 'video' : 'image';
     const base64Data = await fileToBase64(file);
     const postId = 'post_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
 
+    const newPost = {
+        id: postId,
+        media_type: mediaType,
+        media_data: base64Data,
+        reactions: {},
+        created_at: new Date().toISOString()
+    };
+
+    // Affichage instantané en local
+    AppState.posts.unshift(newPost);
+    saveToLocalCache();
+    renderPosts();
+
+    if (!navigator.onLine) {
+        alert("Enregistré localement. La publication se fera au retour du réseau.");
+        return;
+    }
+
     const { error } = await sbClient
         .from('posts')
-        .insert([{
-            id: postId,
-            media_type: mediaType,
-            media_data: base64Data,
-            created_at: new Date().toISOString()
-        }]);
+        .insert([newPost]);
 
     if (error) {
-        alert("Erreur lors de la publication. Le fichier est peut-être trop lourd.");
+        alert("L'image est trop lourde pour la connexion actuelle.");
     }
 }
 
-// --- RÉCUPÉRATION DU FLUX EN TEMPS RÉEL ---
+// --- SYNC TEMPS RÉEL SUPABASE ---
 async function fetchTodayPostsAndSubscribe() {
     const startOfDay = getStartOfTodayISO();
 
-    // 1. Chargement direct des posts
     const { data: posts, error } = await sbClient
         .from('posts')
         .select('*')
@@ -151,21 +266,26 @@ async function fetchTodayPostsAndSubscribe() {
 
     if (!error && posts) {
         AppState.posts = posts;
+        saveToLocalCache();
         renderPosts();
     }
 
-    // 2. Écoute instantanée Supabase Realtime
     sbClient
         .channel('public_feed')
-        .on('postgres_changes', { 
-            event: 'INSERT', 
-            schema: 'public', 
-            table: 'posts' 
-        }, payload => {
-            const newPost = payload.new;
-            if (new Date(newPost.created_at) >= new Date(startOfDay)) {
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, payload => {
+            if (payload.eventType === 'INSERT') {
+                const newPost = payload.new;
                 if (!AppState.posts.some(p => p.id === newPost.id)) {
                     AppState.posts.unshift(newPost);
+                    saveToLocalCache();
+                    renderPosts();
+                }
+            } else if (payload.eventType === 'UPDATE') {
+                const updatedPost = payload.new;
+                const idx = AppState.posts.findIndex(p => p.id === updatedPost.id);
+                if (idx !== -1) {
+                    AppState.posts[idx] = updatedPost;
+                    saveToLocalCache();
                     renderPosts();
                 }
             }
@@ -173,7 +293,7 @@ async function fetchTodayPostsAndSubscribe() {
         .subscribe();
 }
 
-// --- AFFICHAGE DU FLUX ---
+// --- RENDU DÉTAILLÉ DU FLUX ---
 function renderPosts() {
     DOM.feedContainer.innerHTML = '';
 
@@ -185,9 +305,9 @@ function renderPosts() {
 
     if (filteredPosts.length === 0) {
         DOM.feedContainer.innerHTML = `
-            <div class="text-center py-20 text-[var(--text-muted)]">
+            <div class="text-center py-20 text-slate-500">
                 <p class="text-xs uppercase font-mono tracking-wider">Aucun média publié</p>
-                <p class="text-xs mt-1">Prenez une photo ou vidéo pour ouvrir le flux du jour.</p>
+                <p class="text-xs mt-1 text-slate-600">Prenez une photo pour démarrer le flux.</p>
             </div>
         `;
         return;
@@ -195,34 +315,100 @@ function renderPosts() {
 
     filteredPosts.forEach(post => {
         const card = document.createElement('div');
-        card.className = "border border-[var(--border-color)] bg-[var(--bg-surface)] rounded-2xl overflow-hidden shadow-sm";
+        card.className = "post-card bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg space-y-2";
 
         const mediaHtml = post.media_type === 'video'
-            ? `<video src="${post.media_data}" controls class="w-full max-h-[70vh] object-contain bg-black"></video>`
+            ? `<video src="${post.media_data}" controls class="w-full max-h-[70vh] object-contain bg-black" preload="metadata"></video>`
             : `<img src="${post.media_data}" class="w-full max-h-[70vh] object-contain bg-black" loading="lazy">`;
 
         const time = new Date(post.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const ext = post.media_type === 'video' ? 'mp4' : 'jpg';
+        const fileName = `bushub_${post.id}.${ext}`;
+
+        // Calcul des personnes uniques et réagissant
+        const reactions = post.reactions || {};
+        const availableEmojis = ['🔥', '🚌', '👍', '❤️', '😮'];
+        
+        const uniqueUsers = new Set();
+        Object.values(reactions).forEach(arr => {
+            if (Array.isArray(arr)) arr.forEach(u => uniqueUsers.add(u));
+        });
+        const totalPeopleCount = uniqueUsers.size;
+
+        let emojiButtonsHtml = availableEmojis.map(emoji => {
+            const userArray = Array.isArray(reactions[emoji]) ? reactions[emoji] : [];
+            const count = userArray.length;
+            const hasUserReacted = userArray.includes(MY_USER_ID);
+
+            return `
+                <button 
+                    data-action="react" 
+                    data-post-id="${post.id}" 
+                    data-emoji="${emoji}"
+                    class="emoji-btn px-2.5 py-1 rounded-xl text-xs flex items-center space-x-1.5 transition border ${
+                        hasUserReacted 
+                            ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-bold' 
+                            : 'bg-slate-800/80 border-slate-700/60 text-slate-300 hover:bg-slate-700/50'
+                    }">
+                    <span>${emoji}</span>
+                    ${count > 0 ? `<span class="text-[11px] font-mono">${count}</span>` : ''}
+                </button>
+            `;
+        }).join('');
 
         card.innerHTML = `
             ${mediaHtml}
-            <div class="p-3 border-t border-[var(--border-color)] flex justify-between items-center text-[11px] font-mono text-[var(--text-muted)]">
+            
+            <!-- Informations & Timer 24h -->
+            <div class="px-3 pt-2 flex justify-between items-center text-[11px] font-mono text-slate-400">
                 <span class="flex items-center space-x-1.5">
                     <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                    <span>${post.media_type === 'video' ? 'Vidéo' : 'Photo'} en direct</span>
+                    <span>${time}</span>
                 </span>
-                <span>Publié à ${time}</span>
+                <span data-expiry-id="${post.id}" class="text-amber-400 font-semibold">
+                    ⏱️ Expire dans ${getTimeRemaining(post.created_at)}
+                </span>
+            </div>
+
+            <!-- Barre de Réactions Rapides -->
+            <div class="px-3 py-1 flex items-center justify-between border-t border-slate-800/80 pt-2">
+                <div class="flex items-center space-x-1.5 overflow-x-auto no-scrollbar py-0.5">
+                    ${emojiButtonsHtml}
+                </div>
+                <div class="text-[10px] font-mono text-slate-400 shrink-0 ml-2 bg-slate-800 px-2 py-0.5 rounded-full border border-slate-700/50">
+                    👥 <span>${totalPeopleCount} ${totalPeopleCount > 1 ? 'personnes' : 'personne'}</span>
+                </div>
+            </div>
+
+            <!-- Téléchargement Direct -->
+            <div class="p-3 border-t border-slate-800/80 flex justify-between items-center text-[11px] font-mono text-slate-400">
+                <span>${post.media_type === 'video' ? 'Vidéo' : 'Photo'}</span>
+                <a href="${post.media_data}" download="${fileName}" class="px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white active:scale-95 transition flex items-center space-x-1">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                    </svg>
+                    <span>Télécharger</span>
+                </a>
             </div>
         `;
         DOM.feedContainer.appendChild(card);
     });
 }
 
-// --- GESTION DES ÉVÉNEMENTS ---
+// --- ÉVÉNEMENTS & DÉLÉGATION ---
 function setupEventListeners() {
-    // Bouton Reload
-    DOM.reloadBtn.addEventListener('click', forceNetworkReload);
+    if (DOM.reloadBtn) DOM.reloadBtn.addEventListener('click', forceNetworkReload);
 
-    // Changement de filtre
+    // Délégation globale d'événements pour les boutons de réactions
+    DOM.feedContainer.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-action="react"]');
+        if (btn) {
+            const postId = btn.getAttribute('data-post-id');
+            const emoji = btn.getAttribute('data-emoji');
+            handleReactionClick(postId, emoji);
+        }
+    });
+
     const buttons = [
         { el: DOM.filterAll, type: 'all' },
         { el: DOM.filterPhoto, type: 'photo' },
@@ -230,34 +416,34 @@ function setupEventListeners() {
     ];
 
     buttons.forEach(({ el, type }) => {
-        el.addEventListener('click', () => {
-            AppState.filter = type;
-            buttons.forEach(b => {
-                b.el.className = "filter-btn px-3 py-1 rounded-lg text-xs font-medium transition text-[var(--text-muted)]";
+        if (el) {
+            el.addEventListener('click', () => {
+                AppState.filter = type;
+                buttons.forEach(b => {
+                    if (b.el) b.el.className = "flex-1 py-1.5 rounded-lg font-medium transition text-slate-400 hover:text-white";
+                });
+                el.className = "flex-1 py-1.5 rounded-lg font-medium transition text-black bg-emerald-400";
+                renderPosts();
             });
-            el.className = "filter-btn px-3 py-1 rounded-lg text-xs font-medium bg-[var(--accent)] text-black transition";
-            renderPosts();
-        });
+        }
     });
 
-    // Capture média
-    DOM.cameraInput.addEventListener('change', (e) => {
-        if (e.target.files[0]) uploadMedia(e.target.files[0]);
+    if (DOM.cameraInput) {
+        DOM.cameraInput.addEventListener('change', (e) => {
+            if (e.target.files[0]) uploadMedia(e.target.files[0]);
+        });
+    }
+
+    window.addEventListener('online', () => {
+        updateOnlineStatus();
+        fetchTodayPostsAndSubscribe();
     });
+    window.addEventListener('offline', updateOnlineStatus);
 }
 
-// Rechargement automatique si l'utilisateur revient sur la PWA
-document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-        forceNetworkReload();
-    }
-});
-
-// Enregistrement du Service Worker
+// Service Worker Registration
 if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').then((reg) => {
-        reg.update();
-    });
+    navigator.serviceWorker.register('./sw.js').then((reg) => reg.update());
 }
 
 document.addEventListener('DOMContentLoaded', init);

@@ -1,12 +1,11 @@
 {
   "short_name": "BusHub",
-  "name": "BusHub - Groupe Bus Éphémère",
+  "name": "BusHub Live Feed",
   "icons": [
     {
       "src": "https://cdn-icons-png.flaticon.com/512/3448/3448339.png",
-      "type": "image/png",
       "sizes": "512x512",
-      "purpose": "any maskable"
+      "type": "image/png"
     }
   ],
   "start_url": "./index.html",

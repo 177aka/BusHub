@@ -1,59 +1,75 @@
 <!DOCTYPE html>
-<html lang="fr" class="h-full bg-slate-950 text-slate-100">
+<html lang="fr" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>BusHub</title>
-    <link rel="manifest" href="manifest.json">
+    <title>BusHub - Flux Ultra Rapide</title>
+    
     <meta name="theme-color" content="#090d16">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="style.css">
+
+    <!-- CDN Tailwind & Supabase avec fallback local / cache SW -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <link rel="stylesheet" href="style.css">
 </head>
-<body class="h-screen w-screen overflow-hidden font-sans select-none flex flex-col justify-between antialiased bg-[var(--bg-main)] text-[var(--text-main)]">
+<body class="bg-[#090d16] text-slate-100 min-h-screen flex flex-col font-sans antialiased selection:bg-emerald-500 selection:text-black">
 
-    <!-- En-tête -->
-    <header class="h-16 border-b border-[var(--border-color)] bg-[var(--bg-surface)] px-4 flex items-center justify-between shrink-0 z-10">
-        <div class="flex items-center space-x-3">
-            <div class="w-8 h-8 rounded-lg bg-[var(--accent)] flex items-center justify-center font-bold text-xs text-black tracking-wider shrink-0">
-                BH
+    <!-- Barre d'état réseau fixe (Offline Indicator) -->
+    <div id="network-banner" class="hidden bg-amber-500 text-black font-mono text-[11px] font-bold text-center py-1 sticky top-0 z-50 transition-all">
+        ⚠️️ Mode Hors-Ligne : Les médias enregistrés localement sont affichés
+    </div>
+
+    <!-- En-tête de l'application -->
+    <header class="sticky top-0 z-40 backdrop-blur-md bg-[#090d16]/80 border-b border-slate-800 px-4 py-3 flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+            <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center font-bold text-black shadow-lg shadow-emerald-500/20">
+                🚌
             </div>
             <div>
-                <div class="flex items-center space-x-2">
-                    <h1 class="font-semibold text-xs tracking-wide">BusHub Direct</h1>
-                    <!-- Bouton Reload (Need Network) -->
-                    <button id="reload-btn" title="Recharger depuis le réseau" class="p-1 rounded-md bg-[var(--bg-element)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-white active:scale-95 transition flex items-center justify-center">
-                        <svg id="reload-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                        </svg>
-                    </button>
-                </div>
-                <span id="today-badge" class="text-[10px] font-mono text-[var(--text-muted)]">Aujourd'hui</span>
+                <h1 class="text-sm font-bold tracking-tight text-white leading-none">BusHub Live</h1>
+                <span id="today-badge" class="text-[10px] font-mono text-slate-400">Chargement...</span>
             </div>
         </div>
-        
-        <!-- Filtres Catégories -->
-        <div class="flex items-center bg-[var(--bg-element)] p-1 rounded-xl border border-[var(--border-color)]">
-            <button id="filter-all" class="filter-btn px-3 py-1 rounded-lg text-xs font-medium bg-[var(--accent)] text-black transition">Tout</button>
-            <button id="filter-photo" class="filter-btn px-3 py-1 rounded-lg text-xs font-medium text-[var(--text-muted)] transition">📷 Photos</button>
-            <button id="filter-video" class="filter-btn px-3 py-1 rounded-lg text-xs font-medium text-[var(--text-muted)] transition">🎥 Vidéos</button>
-        </div>
+
+        <button id="reload-btn" class="p-2 rounded-xl bg-slate-800/80 border border-slate-700/60 text-slate-300 hover:text-white active:scale-95 transition flex items-center justify-center">
+            <svg id="reload-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+        </button>
     </header>
 
-    <!-- Flux Média -->
-    <main class="flex-1 overflow-y-auto p-4 space-y-4 max-w-lg mx-auto w-full" id="feed-container">
-        <!-- Contenu dynamique -->
+    <!-- Conteneur principal -->
+    <main class="flex-1 max-w-lg w-full mx-auto px-3 py-4 space-y-4">
+
+        <!-- Barre de filtres -->
+        <div class="flex items-center justify-between bg-slate-900/90 p-1 rounded-xl border border-slate-800 text-xs">
+            <button id="filter-all" class="flex-1 py-1.5 rounded-lg font-medium transition text-black bg-emerald-400">Tout</button>
+            <button id="filter-photo" class="flex-1 py-1.5 rounded-lg font-medium transition text-slate-400 hover:text-white">📷 Photos</button>
+            <button id="filter-video" class="flex-1 py-1.5 rounded-lg font-medium transition text-slate-400 hover:text-white">🎥 Vidéos</button>
+        </div>
+
+        <!-- Flux des publications -->
+        <div id="feed-container" class="space-y-4">
+            <!-- Skeleton Loader instantané pendant l'initialisation -->
+            <div class="animate-pulse bg-slate-900 rounded-2xl h-80 border border-slate-800 flex items-center justify-center text-slate-600 font-mono text-xs">
+                Chargement ultra rapide...
+            </div>
+        </div>
     </main>
 
-    <!-- Pied de page : Prise de vue -->
-    <footer class="h-20 border-t border-[var(--border-color)] bg-[var(--bg-surface)] flex items-center justify-center shrink-0">
-        <label for="camera-input" class="cursor-pointer group flex items-center justify-center">
-            <div class="w-14 h-14 rounded-full border border-[var(--border-color)] bg-[var(--bg-element)] flex items-center justify-center transition group-active:scale-95 group-hover:border-[var(--accent)] shadow-md">
-                <div class="w-10 h-10 rounded-full bg-[var(--accent)]"></div>
-            </div>
+    <!-- Bouton de prise de vue rapide (Camera/Gallery Floating Action Button) -->
+    <div class="fixed bottom-5 right-5 z-40">
+        <label for="camera-input" class="w-14 h-14 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center shadow-xl shadow-emerald-500/30 cursor-pointer active:scale-90 transition border-2 border-emerald-300">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path>
+                <circle cx="12" cy="13" r="3" stroke-width="2"></circle>
+            </svg>
         </label>
-        <input type="file" id="camera-input" accept="image/*,video/*" class="hidden">
-    </footer>
+        <input type="file" id="camera-input" accept="image/*,video/*" capture="environment" class="hidden">
+    </div>
 
     <script src="app.js"></script>
 </body>
