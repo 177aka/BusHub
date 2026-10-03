@@ -1,7 +1,6 @@
 // ⚠️ Remplace TON_ID_PROJET par le vrai ID de ton projet Supabase
 const SUPABASE_URL = 'https://sglpkosiijcftoiqlcyg.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_3Rnvf81P39qJ_IepYWzvhQ_HZR9WL66';
-
 const sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const AppState = {
@@ -15,7 +14,9 @@ const DOM = {
     cameraInput: document.getElementById('camera-input'),
     filterAll: document.getElementById('filter-all'),
     filterPhoto: document.getElementById('filter-photo'),
-    filterVideo: document.getElementById('filter-video')
+    filterVideo: document.getElementById('filter-video'),
+    reloadBtn: document.getElementById('reload-btn'),
+    reloadIcon: document.getElementById('reload-icon')
 };
 
 function getStartOfTodayISO() {
@@ -36,34 +37,48 @@ async function init() {
     await fetchTodayPostsAndSubscribe();
 }
 
-// 1. Enregistrement du Service Worker avec vérification de mise à jour
-if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').then((reg) => {
-        // Forcer la recherche de mise à jour du SW à chaque ouverture
-        reg.update();
-    });
-}
-
-// 2. Détecter quand l'application revient au premier plan (quand on clique sur l'icône PWA)
-document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-        // Rafraîchit automatiquement le flux du jour en direct
-        if (typeof fetchTodayPostsAndSubscribe === 'function') {
-            fetchTodayPostsAndSubscribe();
-        }
+// --- FONCTION DE RELOAD (NEED NETWORK) ---
+async function forceNetworkReload() {
+    // Vérification de la connexion Internet
+    if (!navigator.onLine) {
+        alert("Connexion réseau requise pour recharger le flux en direct.");
+        return;
     }
-});
+
+    // Animation de rotation sur le bouton
+    DOM.reloadIcon.classList.add('animate-spin');
+
+    try {
+        // Vider les caches du Service Worker
+        if ('caches' in window) {
+            const cacheNames = await caches.keys();
+            await Promise.all(cacheNames.map(name => caches.delete(name)));
+        }
+
+        // Répartir l'abonnement Realtime Supabase
+        sbClient.removeAllChannels();
+
+        // Récupération forcée depuis la BDD Supabase
+        await fetchTodayPostsAndSubscribe();
+
+    } catch (err) {
+        console.error("Erreur lors du rechargement:", err);
+    } finally {
+        // Arrêt de l'animation après un petit délai visuel
+        setTimeout(() => {
+            DOM.reloadIcon.classList.remove('animate-spin');
+        }, 500);
+    }
+}
 
 // --- COMPRESSION COMPACTE ---
 function fileToBase64(file) {
     return new Promise((resolve) => {
         if (file.type.startsWith('video')) {
-            // Limite la taille des vidéos pour ne pas saturer la requête
             const reader = new FileReader();
             reader.onload = (e) => resolve(e.target.result);
             reader.readAsDataURL(file);
         } else {
-            // Compression dynamique de l'image
             const reader = new FileReader();
             reader.onload = (e) => {
                 const img = new Image();
@@ -71,7 +86,7 @@ function fileToBase64(file) {
                     const canvas = document.createElement('canvas');
                     let width = img.width;
                     let height = img.height;
-                    const maxDim = 800; // Taille optimale mobile
+                    const maxDim = 800;
 
                     if (width > maxDim || height > maxDim) {
                         if (width > height) {
@@ -99,6 +114,11 @@ function fileToBase64(file) {
 
 // --- PUBLICATION EN DIRECT ---
 async function uploadMedia(file) {
+    if (!navigator.onLine) {
+        alert("Impossible de publier sans connexion réseau.");
+        return;
+    }
+
     const isVideo = file.type.startsWith('video');
     const mediaType = isVideo ? 'video' : 'image';
     const base64Data = await fileToBase64(file);
@@ -122,7 +142,7 @@ async function uploadMedia(file) {
 async function fetchTodayPostsAndSubscribe() {
     const startOfDay = getStartOfTodayISO();
 
-    // 1. Chargement des posts créés depuis minuit
+    // 1. Chargement direct des posts
     const { data: posts, error } = await sbClient
         .from('posts')
         .select('*')
@@ -134,7 +154,7 @@ async function fetchTodayPostsAndSubscribe() {
         renderPosts();
     }
 
-    // 2. Écoute instantanée des nouveaux messages créés
+    // 2. Écoute instantanée Supabase Realtime
     sbClient
         .channel('public_feed')
         .on('postgres_changes', { 
@@ -199,6 +219,9 @@ function renderPosts() {
 
 // --- GESTION DES ÉVÉNEMENTS ---
 function setupEventListeners() {
+    // Bouton Reload
+    DOM.reloadBtn.addEventListener('click', forceNetworkReload);
+
     // Changement de filtre
     const buttons = [
         { el: DOM.filterAll, type: 'all' },
@@ -220,6 +243,20 @@ function setupEventListeners() {
     // Capture média
     DOM.cameraInput.addEventListener('change', (e) => {
         if (e.target.files[0]) uploadMedia(e.target.files[0]);
+    });
+}
+
+// Rechargement automatique si l'utilisateur revient sur la PWA
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        forceNetworkReload();
+    }
+});
+
+// Enregistrement du Service Worker
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').then((reg) => {
+        reg.update();
     });
 }
 
