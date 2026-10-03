@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="fr" class="h-full bg-slate-950 text-slate-100">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>BusHub</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#090d16">
+    <!-- Tailwind CSS v3 via CDN Play -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Supabase JS Client -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="h-screen w-screen overflow-hidden font-sans select-none flex flex-col justify-between antialiased bg-[var(--bg-main)] text-[var(--text-main)]">
+
+    <!-- En-tête -->
+    <header class="h-16 border-b border-[var(--border-color)] bg-[var(--bg-surface)] px-4 flex items-center justify-between shrink-0 z-10">
+        <div class="flex items-center space-x-3">
+            <div class="w-8 h-8 rounded-lg bg-[var(--accent)] flex items-center justify-center font-bold text-xs text-black tracking-wider shadow-sm shrink-0">
+                BH
+            </div>
+            <div class="min-w-0">
+                <div class="flex items-center space-x-2">
+                    <h1 id="group-title" class="font-semibold text-xs tracking-wide truncate">Aucun groupe</h1>
+                    <span id="today-badge" class="px-1.5 py-0.5 rounded text-[9px] font-mono bg-[var(--bg-element)] text-[var(--text-muted)] border border-[var(--border-color)] whitespace-nowrap">
+                        Aujourd'hui
+                    </span>
+                </div>
+                <p id="group-members-count" class="text-[10px] text-[var(--text-muted)] font-mono">0 / 200 membres</p>
+            </div>
+        </div>
+        
+        <div class="flex items-center space-x-2 shrink-0">
+            <button id="btn-group-menu" class="px-3 py-1.5 rounded-lg bg-[var(--bg-element)] hover:bg-[var(--bg-element-hover)] text-xs border border-[var(--border-color)] font-medium transition active:scale-95">
+                Groupes
+            </button>
+            <button id="btn-settings" class="p-2 rounded-lg bg-[var(--bg-element)] hover:bg-[var(--bg-element-hover)] border border-[var(--border-color)] transition active:scale-95">
+                <svg class="w-4 h-4 text-[var(--text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Flux Média -->
+    <main class="flex-1 overflow-y-auto p-4 space-y-4 max-w-lg mx-auto w-full" id="feed-container">
+        <!-- Contenu dynamique -->
+    </main>
+
+    <!-- Pied de page avec bouton appareil photo -->
+    <footer class="h-20 border-t border-[var(--border-color)] bg-[var(--bg-surface)] flex items-center justify-center shrink-0">
+        <label for="camera-input" class="cursor-pointer group flex items-center justify-center">
+            <div class="w-14 h-14 rounded-full border border-[var(--border-color)] bg-[var(--bg-element)] flex items-center justify-center transition group-active:scale-95 group-hover:border-[var(--accent)] shadow-md">
+                <div class="w-10 h-10 rounded-full bg-[var(--accent)]"></div>
+            </div>
+        </label>
+        <input type="file" id="camera-input" accept="image/*,video/*" class="hidden">
+    </footer>
+
+    <!-- MODAL : Groupes -->
+    <div id="modal-groups" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-2xl w-full max-w-sm p-5 space-y-5 shadow-2xl">
+            <div class="flex justify-between items-center border-b border-[var(--border-color)] pb-3">
+                <h2 class="font-semibold text-sm tracking-wide">Rejoindre / Créer un groupe</h2>
+                <button id="close-modal-groups" class="text-[var(--text-muted)] hover:text-[var(--text-main)] text-sm">✕</button>
+            </div>
+
+            <!-- Rejoindre -->
+            <div class="space-y-2">
+                <label class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-mono">Code d'accès</label>
+                <div class="flex space-x-2">
+                    <input type="text" id="join-code-input" placeholder="BH-1234" class="flex-1 bg-[var(--bg-main)] border border-[var(--border-color)] rounded-xl px-3 py-2 text-xs font-mono tracking-wider focus:outline-none uppercase">
+                    <button id="btn-join" class="bg-[var(--accent)] text-black font-semibold text-xs px-4 rounded-xl hover:opacity-90 transition">Rejoindre</button>
+                </div>
+            </div>
+
+            <div class="border-t border-[var(--border-color)]"></div>
+
+            <!-- Créer -->
+            <div class="space-y-2">
+                <label class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-mono">Nouveau groupe</label>
+                <input type="text" id="create-name-input" placeholder="Ex: Ligne 800 Express" class="w-full bg-[var(--bg-main)] border border-[var(--border-color)] rounded-xl px-3 py-2 text-xs focus:outline-none">
+                <button id="btn-create" class="w-full bg-[var(--bg-element)] border border-[var(--border-color)] text-[var(--text-main)] font-semibold text-xs py-2.5 rounded-xl hover:bg-[var(--bg-element-hover)] transition">Créer le groupe</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL : Settings -->
+    <div id="modal-settings" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-2xl w-full max-w-sm p-5 space-y-5 shadow-2xl">
+            <div class="flex justify-between items-center border-b border-[var(--border-color)] pb-3">
+                <h2 class="font-semibold text-sm tracking-wide">Paramètres</h2>
+                <button id="close-modal-settings" class="text-[var(--text-muted)] hover:text-[var(--text-main)] text-sm">✕</button>
+            </div>
+
+            <div class="space-y-2">
+                <label class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-mono">Thème visuel</label>
+                <div class="grid grid-cols-3 gap-2">
+                    <button data-theme="dark" class="theme-btn border border-[var(--border-color)] bg-[#0d1117] text-white text-xs py-2 rounded-xl font-medium">Dark</button>
+                    <button data-theme="oled" class="theme-btn border border-[var(--border-color)] bg-black text-white text-xs py-2 rounded-xl font-medium">OLED</button>
+                    <button data-theme="light" class="theme-btn border border-[var(--border-color)] bg-white text-black text-xs py-2 rounded-xl font-medium">Light</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
