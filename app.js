@@ -36,6 +36,24 @@ async function init() {
     await fetchTodayPostsAndSubscribe();
 }
 
+// 1. Enregistrement du Service Worker avec vérification de mise à jour
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').then((reg) => {
+        // Forcer la recherche de mise à jour du SW à chaque ouverture
+        reg.update();
+    });
+}
+
+// 2. Détecter quand l'application revient au premier plan (quand on clique sur l'icône PWA)
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        // Rafraîchit automatiquement le flux du jour en direct
+        if (typeof fetchTodayPostsAndSubscribe === 'function') {
+            fetchTodayPostsAndSubscribe();
+        }
+    }
+});
+
 // --- COMPRESSION COMPACTE ---
 function fileToBase64(file) {
     return new Promise((resolve) => {
