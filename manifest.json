@@ -1,16 +1,16 @@
 {
-  "short_name": "BusHub",
-  "name": "BusHub Live Feed",
+  "name": "PromoQC - Générateur de Cartes",
+  "short_name": "PromoQC",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
   "icons": [
     {
-      "src": "https://cdn-icons-png.flaticon.com/512/3448/3448339.png",
+      "src": "icon.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
     }
-  ],
-  "start_url": "./index.html",
-  "background_color": "#090d16",
-  "theme_color": "#090d16",
-  "display": "standalone",
-  "orientation": "portrait"
+  ]
 }
